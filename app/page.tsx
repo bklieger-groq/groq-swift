@@ -1,9 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { EnterIcon, LoadingIcon, MicrophoneIcon, MicrophoneOffIcon } from "@/lib/icons";
+import { EnterIcon, LoadingIcon, MicrophoneIcon, MicrophoneOffIcon, SettingsIcon } from "@/lib/icons";
 import { usePlayer } from "@/lib/usePlayer";
 import { track } from "@vercel/analytics";
 import { useMicVAD, utils } from "@ricky0123/vad-react";
@@ -22,6 +22,8 @@ export default function Home() {
 	const [isMuted, setIsMuted] = useState(false);
 	const dotRef = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(1);
+	const [document, setDocument] = useState("");
+	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
 	const vad = useMicVAD({
 		startOnLoad: !isMuted,
@@ -54,6 +56,15 @@ export default function Home() {
 			};
 		},
 	});
+
+	const toggleMute = useCallback(() => {
+		setIsMuted((prev) => !prev);
+		if (isMuted) {
+			vad.start();
+		} else {
+			vad.pause();
+		}
+	}, [isMuted, vad]);
 
 	useEffect(() => {
 		function keyDown(e: KeyboardEvent) {
@@ -113,6 +124,10 @@ export default function Home() {
 		for (const message of prevMessages) {
 			formData.append("message", JSON.stringify(message));
 		}
+		
+		if (document){
+			formData.append("document", document);
+		}
 
 		const submittedAt = Date.now();
 
@@ -159,18 +174,76 @@ export default function Home() {
 		];
 	}, []);
 
+	const submitCallback = useCallback(async (data: string | Blob) => {
+		const formData = new FormData();
+
+		if (typeof data === "string") {
+			formData.append("input", data);
+			track("Text input");
+		} else {
+			formData.append("input", data, "audio.wav");
+			track("Speech input");
+		}
+
+		for (const message of messages) {
+			formData.append("message", JSON.stringify(message));
+		}
+
+		formData.append("document", document);
+
+		const submittedAt = Date.now();
+
+		const response = await fetch("/api", {
+			method: "POST",
+			body: formData,
+		});
+
+		const transcript = decodeURIComponent(
+			response.headers.get("X-Transcript") || ""
+		);
+		const text = decodeURIComponent(
+			response.headers.get("X-Response") || ""
+		);
+
+		if (!response.ok || !transcript || !text || !response.body) {
+			if (response.status === 429) {
+				toast.error("Too many requests. Please try again later.");
+			} else {
+				toast.error((await response.text()) || "An error occurred.");
+			}
+
+			return messages;
+		}
+
+		const latency = Date.now() - submittedAt;
+		player.play(response.body, () => {
+			const isFirefox = navigator.userAgent.includes("Firefox");
+			if (isFirefox) vad.start();
+		});
+		setInput(transcript);
+
+		return [
+			...messages,
+			{
+				role: "user",
+				content: transcript,
+			},
+			{
+				role: "assistant",
+				content: text,
+				latency,
+			},
+		];
+	}, [messages, document, player, vad]);
+
 	function handleFormSubmit(e: React.FormEvent) {
 		e.preventDefault();
-		submit(input);
+		submitCallback(input);
 	}
 
-	function toggleMute() {
-		setIsMuted(!isMuted);
-		if (isMuted) {
-			vad.start();
-		} else {
-			vad.pause();
-		}
+	function handleDocumentSubmit(e: React.FormEvent) {
+		e.preventDefault();
+		setIsSettingsOpen(false);
 	}
 
 	return (
@@ -226,6 +299,46 @@ export default function Home() {
 			>
 				{isMuted ? <MicrophoneOffIcon /> : <MicrophoneIcon />}
 			</button>
+
+			<button
+				onClick={() => setIsSettingsOpen(true)}
+				className="fixed bottom-4 left-4 p-4 text-[#F55036] rounded-full"
+				aria-label="Open settings"
+			>
+				<SettingsIcon />
+			</button>
+
+			{isSettingsOpen && (
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+					<div className="bg-white dark:bg-gray-800 p-6 rounded-lg max-w-2xl w-full">
+						<h2 className="text-2xl font-bold mb-4">Document</h2>
+						<form onSubmit={handleDocumentSubmit}>
+							<textarea
+								value={document}
+								onChange={(e) => setDocument(e.target.value)}
+								placeholder="Enter your document here..."
+								className="w-full h-64 p-2 border border-gray-300 dark:border-gray-700 rounded mb-4"
+							/>
+							<div className="flex justify-end">
+								<button
+									type="button"
+									onClick={() => setIsSettingsOpen(false)}
+									className="mr-2 px-4 py-2 text-gray-600 dark:text-gray-400"
+								>
+									Cancel
+								</button>
+								<button
+									type="submit"
+									className="px-4 py-2 bg-[#F55036] text-white rounded"
+								>
+									Save
+								</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			)}
+
 		</>
 	);
 }
