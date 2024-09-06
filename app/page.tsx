@@ -212,7 +212,7 @@ export default function Home() {
 				toast.error((await response.text()) || "An error occurred.");
 			}
 
-			return prevMessages;
+			return messages;
 		}
 
 		const latency = Date.now() - submittedAt;
@@ -223,7 +223,7 @@ export default function Home() {
 		setInput(transcript);
 
 		return [
-			...prevMessages,
+			...messages,
 			{
 				role: "user",
 				content: transcript,
@@ -234,7 +234,7 @@ export default function Home() {
 				latency,
 			},
 		];
-	}, [messages, document]);
+	}, [messages, document, player, vad]);
 
 	function handleFormSubmit(e: React.FormEvent) {
 		e.preventDefault();
