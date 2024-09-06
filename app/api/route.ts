@@ -16,12 +16,14 @@ const schema = zfd.formData({
 			})
 		)
 	),
+	document: zfd.text().optional(),
 });
 
 export async function POST(request: Request) {
 	console.time("transcribe " + request.headers.get("x-vercel-id") || "local");
-
+	
 	const { data, success } = schema.safeParse(await request.formData());
+
 	if (!success) return new Response("Invalid request", { status: 400 });
 
 	const transcript = await getTranscript(data.input);
@@ -39,17 +41,17 @@ export async function POST(request: Request) {
 		messages: [
 			{
 				role: "system",
-				content: `- You a friendly and helpful voice assistant powered by Groq.
+				content: `- You a friendly and helpful voice assistant powered by Groq. You are answering questions about a provided product document.
 			- Respond briefly to the user's request, and do not provide unnecessary information.
 			- If you don't understand the user's request, ask for clarification.
-			- You do not have access to up-to-date information, so you should not provide real-time data.
 			- You are not capable of performing actions other than responding to the user.
 			- Do not use markdown, emojis, or other formatting in your responses. Respond in a way easily spoken by text-to-speech software.
-			- User location is ${location()}.
-			- The current time is ${time()}.
 			- Your large language model is Llama 3, created by Meta, the 8 billion parameter version. It is hosted on Groq, an AI infrastructure company that builds fast inference technology.
 			- Your speech-to-text model is Whisper, running on Groq.
-			- You are built with Next.js and hosted on Vercel.`,
+			- You are built with Next.js and hosted on Vercel.
+
+			# Product Document:
+			${data.document ? `\n${data.document}` : ''}`,
 			},
 			...data.message,
 			{
@@ -60,6 +62,9 @@ export async function POST(request: Request) {
 	});
 
 	const response = completion.choices[0].message.content;
+
+	const cleanedResponse = response.replace(/[*#|\-]/g, '.');
+
 	console.timeEnd(
 		"text completion " + request.headers.get("x-vercel-id") || "local"
 	);
@@ -77,7 +82,7 @@ export async function POST(request: Request) {
 		},
 		body: JSON.stringify({
 			model_id: "sonic-english",
-			transcript: response,
+			transcript: cleanedResponse,
 			voice: {
 				mode: "id",
 				id: "79a125e8-cd45-4c13-8a67-188112f4dd22",
